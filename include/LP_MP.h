@@ -152,7 +152,7 @@ public:
    bool operator==(const MessageIterator& rhs) const { return (factor_ == rhs.factor_ && msg_idx_ == rhs.msg_idx_); }
    bool operator!=(const MessageIterator& rhs) const { return !operator==(rhs); }
    MessageTypeAdapter& operator*() const { return *(factor_->GetMessage(msg_idx_)); }
-   MessageTypeAdapter& operator->() const { return *(factor_->GetMessage(msg_idx_)); }
+   MessageTypeAdapter* operator->() const { return factor_->GetMessage(msg_idx_); }
    FactorTypeAdapter* GetConnectedFactor() const { return factor_->GetConnectedFactor(msg_idx_); }
    bool SendsMessage() const  { return factor_->SendsMessage(msg_idx_); }
 private:
