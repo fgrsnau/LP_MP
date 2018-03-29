@@ -131,6 +131,9 @@ public:
    virtual FactorTypeAdapter* GetRightFactorTypeAdapter() const = 0;
    virtual FactorTypeAdapter* GetLeftFactorTypeAdapter() const = 0;
 
+   virtual void send_message_to_left(const REAL omega = 1.0) = 0;
+   virtual void send_message_to_right(const REAL omega = 1.0) = 0;
+
    virtual void send_message_up(Chirality c) = 0;
    virtual void track_solution_down(Chirality c) = 0;
    
