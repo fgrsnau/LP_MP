@@ -187,7 +187,7 @@ inline MessageIterator FactorTypeAdapter::end()  { return MessageIterator(this, 
 */
 
 
-template<typename FMC>
+template<typename FMC_TYPE>
 class LP {
    struct message_trait
    {
@@ -197,6 +197,8 @@ class LP {
    };
 
 public:
+   using FMC = FMC_TYPE;
+
    LP(TCLAP::CmdLine& cmd);
    ~LP();
    LP(LP& o);
