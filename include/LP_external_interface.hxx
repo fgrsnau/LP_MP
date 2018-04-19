@@ -12,7 +12,7 @@
 // and
 //   template<typename EXTERNAL_SOLVER>
 //   void convert_to_primal(EXTERNAL_SOLVER& s, TYPES...)
-// where TYPES is a list of parameters of type EXTERNAL_SOLVER::{variable|vector|matrix|tensor} whose number and type matches the respective arguments given to export_variables() 
+// where TYPES is a list of parameters of type EXTERNAL_SOLVER::{variable|vector|matrix|tensor} whose number and type matches the respective arguments given to export_variables()
 // likewise, a message must also provide a function
 // template<typename EXTERNAL_SOLVER, typename LEFT_FACTOR, typename RIGHT_FACTOR>
 // void construct_constraints(EXTERNAL_SOLVER&s, LEFT_FACTOR& left, LEFT_TYPES..., RIGHT_FACTOR& right, RIGHT_TYPES...)
@@ -26,54 +26,54 @@ public:
 
   using BASE_LP_SOLVER::BASE_LP_SOLVER;
 
-  virtual INDEX AddFactor(FactorTypeAdapter* f)
+  template<typename FACTOR_CONTAINER_TYPE, typename... ARGS>
+  FACTOR_CONTAINER_TYPE* add_factor(ARGS... args)
   {
-    const INDEX factor_no = BASE_LP_SOLVER::AddFactor(f);
+    FACTOR_CONTAINER_TYPE* f = BASE_LP_SOLVER::template add_factor<FACTOR_CONTAINER_TYPE>(args...);
     external_variable_counter_.push_back(s_.get_variable_counters());
     f->construct_constraints(s_);
-    return factor_no;
+    return f;
   }
 
-  virtual INDEX AddMessage(MessageTypeAdapter* m)
+  template<typename MESSAGE_CONTAINER_TYPE, typename LEFT_FACTOR, typename RIGHT_FACTOR, typename... ARGS>
+  MESSAGE_CONTAINER_TYPE* add_message(LEFT_FACTOR* l, RIGHT_FACTOR* r, ARGS... args)
   {
-    const INDEX message_no = BASE_LP_SOLVER::AddMessage(m); 
+    MESSAGE_CONTAINER_TYPE* m = BASE_LP_SOLVER::template add_message<MESSAGE_CONTAINER_TYPE>(l, r, args...);
 
-    const INDEX left_factor_no = this->factor_address_to_index_[m->GetLeftFactorTypeAdapter()];
+    const INDEX left_factor_no = this->factor_address_to_index_[l];
     assert(left_factor_no < this->GetNumberOfFactors() && left_factor_no < external_variable_counter_.size());
 
-    const INDEX right_factor_no = this->factor_address_to_index_[m->GetRightFactorTypeAdapter()];
+    const INDEX right_factor_no = this->factor_address_to_index_[r];
     assert(right_factor_no < this->GetNumberOfFactors() && right_factor_no < external_variable_counter_.size());
 
     m->construct_constraints(s_, external_variable_counter_[left_factor_no], external_variable_counter_[right_factor_no]);
-
-    return message_no;
+    return m;
   }
 
   const external_solver& get_external_solver() const { return s_; }
 
   void solve()
   {
-    // go over all factors and write costs to external problem
-    s_.init_variable_loading();
-    for(INDEX i=0; i<this->GetNumberOfFactors(); ++i) {
-      this->f_[i]->load_costs(s_);
-    } 
-
+    load_costs();
     s_.solve();
   }
 
-  void write_to_file(const std::string& filename) { 
-    s_.init_variable_loading();
-    for(INDEX i=0; i<this->GetNumberOfFactors(); ++i) {
-      this->f_[i]->load_costs(s_);
-    } 
-    s_.write_to_file(filename); 
+  void write_to_file(const std::string& filename) {
+    load_costs();
+    s_.write_to_file(filename);
   }
 
 private:
-   external_solver s_; 
+  void load_costs() {
+    s_.init_variable_loading();
+    for(INDEX i = 0; i < this->GetNumberOfFactors(); ++i) {
+      this->f_[i]->load_costs(s_);
+    }
+  }
 
-   std::vector<typename DD_ILP::variable_counters> external_variable_counter_;
+  external_solver s_;
+
+  std::vector<typename DD_ILP::variable_counters> external_variable_counter_;
 };
 
 
