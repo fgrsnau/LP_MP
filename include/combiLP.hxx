@@ -17,6 +17,10 @@ public:
   using BASE_LP::BASE_LP;
 
   double LowerBound() {
+    return is_ilp_phase_ ? PseudoBound() : BASE_LP::LowerBound();
+  }
+
+  double PseudoBound() {
     double cost = this->constant_;
     for (auto* f : this->f_) {
       assert(f->LowerBound() <= f->EvaluatePrimal() + eps);
@@ -26,6 +30,8 @@ public:
   }
 
   void End() {
+    is_ilp_phase_ = true;
+
     enum class State { LP, Active, ILP };
 
 #ifndef NDEBUG
@@ -56,32 +62,32 @@ public:
       // optimality checking by modifying the assignment and checking the
       // bounds.
       decltype(archive) a(this->f_.begin(), this->f_.end());
-      for (auto* f : this->f_) {
+      this->for_each_factor([&](auto* f) {
         assert(factor_states.find(f) != factor_states.end());
         if (factor_states[f] == State::LP) {
           assert(decltype(archive)::check_factor_equality(archive, a, f));
         }
-      }
+      });
 
       // Messages inside LP and ILP have to be consistent (messages on borders
       // are excluded).
-      for (auto* m : this->m_) {
-        auto* l = m->GetLeftFactor(); bool l_in_ilp = external_solver.HasFactor(l);
-        auto* r = m->GetRightFactor(); bool r_in_ilp = external_solver.HasFactor(r);
+      this->for_each_message([&](auto* m) {
+        auto* l = m->GetLeftFactor(); bool l_in_ilp = external_solver.has_factor(l);
+        auto* r = m->GetRightFactor(); bool r_in_ilp = external_solver.has_factor(r);
         if (l_in_ilp == r_in_ilp)
           assert(m->CheckPrimalConsistency());
-      }
+      });
     };
 #endif
 
     auto add_factor = [&](FactorTypeAdapter* f) {
       assert(factor_states.find(f) != factor_states.end());
       if (factor_states[f] == State::Active)
-        external_solver.AddFactor(f);
+        external_solver.add_factor(f);
     };
 
     auto update_partition = [&]() {
-      for (auto* f : this->f_) {
+      this->for_each_factor([&](auto* f) {
         assert(f->LowerBound() <= f->EvaluatePrimal() + eps);
         assert(factor_states.find(f) != factor_states.end());
         switch (factor_states[f]) {
@@ -95,9 +101,9 @@ public:
         case State::ILP:
           break;
         };
-      }
+      });
 
-      for (auto* m : this->m_) {
+      this->for_each_message([&](auto* m) {
         if (!m->CheckPrimalConsistency()) { // no factor agreement
 #ifndef NDEBUG
           bool handled = false;
@@ -114,12 +120,12 @@ public:
           }
           assert(handled);
         }
-      }
+      });
 
       size_lp = 0; size_active = 0; size_ilp = 0;
       for (auto* f : this->f_) {
         assert(factor_states.find(f) != factor_states.end());
-        if (external_solver.HasFactor(f)) {
+        if (external_solver.has_factor(f)) {
           factor_states[f] = State::ILP;
           ++size_ilp;
         } else {
@@ -129,7 +135,7 @@ public:
       }
       assert(size_lp + size_active + size_ilp == this->f_.size());
 
-      for (auto* m : this->m_) {
+      this->for_each_message([&](auto* m) {
         auto* lf = m->GetLeftFactor();
         auto* rf = m->GetRightFactor();
         assert(factor_states.find(lf) != factor_states.end());
@@ -145,7 +151,7 @@ public:
           --size_lp;
           ++size_active;
         }
-      }
+      });
       assert(size_lp + size_active + size_ilp == this->f_.size());
     };
 
@@ -167,12 +173,12 @@ public:
       // on Graphical Models. This should be a huge performance boost as it
       // reduces the number of iterations.
       INDEX bridge_count = external_solver.GetNumberOfFactors();
-      for (auto* f : this->f_)
-        // TODO: Only iterate over assigned factors.
-        if (external_solver.HasFactor(f))
+      this->for_each_factor([&](auto* f) {
+        if (external_solver.has_factor(f))
           if (f->no_messages() <= 2) // is bridging factor
-            for (auto it = f->begin(); it != f->end(); ++it)
-              external_solver.AddFactor(it.GetConnectedFactor());
+            for (auto& msg_it : f->get_messages())
+              external_solver.add_factor(msg_it.adjacent_factor);
+      });
       bridge_count = external_solver.GetNumberOfFactors() - bridge_count;
       std::cout << "CombiLP: Added " << bridge_count << " bridging factors." << std::endl;
 #endif // LP_MP_COMBILP_DISABLE_BRIDGE_FACTOR_OPTIMIZATION
@@ -180,25 +186,25 @@ public:
       // Reparametrize border: Improves convergence.
       // TODO: Evaluate if this is really necessary and improves convergence
       // significantly.
-      for (auto* m : this->m_) {
+      this->for_each_message([&](auto* m) {
         auto* l = m->GetLeftFactor();
         auto* r = m->GetRightFactor();
-        if (external_solver.HasFactor(l) && !external_solver.HasFactor(r))
+        if (external_solver.has_factor(l) && !external_solver.has_factor(r))
           m->send_message_to_left();
-        if (!external_solver.HasFactor(l) && external_solver.HasFactor(r))
+        if (!external_solver.has_factor(l) && external_solver.has_factor(r))
           m->send_message_to_right();
-      }
+      });
 
       // Add messages connecting all factors in the ILP.
-      external_solver.AddMessages(*this);
+      external_solver.add_messages(*this);
 
       ++iteration;
       std::cout << std::endl << "CombiLP iteration " << iteration << ": "
                 << "lp=" << size_lp << " "
                 << "active=" << size_active << " "
                 << "ilp=" << size_ilp << " / "
-                << this->f_.size() << " ("
-                << (100.0f * size_ilp / this->f_.size())
+                << this->GetNumberOfFactors() << " ("
+                << (100.0f * size_ilp / this->GetNumberOfFactors())
                 << "%)" << std::endl;
 
       const bool solved = external_solver.solve();
@@ -221,7 +227,7 @@ public:
       // part gets restored, "active" part of LP remains modified, as
       // optimality is checked by comparing bounds).
       for (auto* f : this->f_)
-        if (external_solver.HasFactor(f))
+        if (external_solver.has_factor(f))
           f->propagate_primal_through_messages();
 
       upper_bound = this->EvaluatePrimal();
@@ -242,8 +248,7 @@ public:
     upper_bound = this->EvaluatePrimal();
     std::cout << "DEBUG: " << lower_bound << " / " << upper_bound << std::endl;
 
-    for (auto* m : this->m_)
-      assert(m->CheckPrimalConsistency());
+    this->for_each_message([&](auto* m) { assert(m->CheckPrimalConsistency()); });
     assert(std::abs(upper_bound - lower_bound) <= eps);
 
     // Check the invariant one last time. As we have solved the problem there
@@ -259,6 +264,9 @@ public:
     }
 #endif
   }
+
+private:
+  bool is_ilp_phase_ = false;
 };
 
 } // namespace LP_MP

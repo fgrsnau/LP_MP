@@ -13,8 +13,9 @@ namespace LP_MP {
 template<typename EXTERNAL_SOLVER>
 class partial_external_solver {
 public:
-  void AddFactor(FactorTypeAdapter* f) {
-    if (!HasFactor(f)) {
+  template<typename FACTOR_CONTAINER_TYPE>
+  void add_factor(FACTOR_CONTAINER_TYPE* f) {
+    if (!has_factor(f)) {
       dirty_ = true;
       factor_address_to_index_.insert(std::make_pair(f, f_.size()));
       f_.push_back(f);
@@ -25,12 +26,13 @@ public:
     }
   }
 
-  void AddMessage(MessageTypeAdapter* m) {
-    if (!HasMessage(m)) {
+  template<typename MESSAGE_CONTAINER_TYPE>
+  void add_message(MESSAGE_CONTAINER_TYPE* m) {
+    if (!has_message(m)) {
       dirty_ = true;
       auto* l = m->GetLeftFactor();
       auto* r = m->GetRightFactor();
-      assert(HasFactor(l) && HasFactor(r));
+      assert(has_factor(l) && has_factor(r));
       auto li = factor_address_to_index_[l];
       auto ri = factor_address_to_index_[r];
       m->construct_constraints(s_, external_variable_counter_[li], external_variable_counter_[ri]);
@@ -38,19 +40,18 @@ public:
   }
 
   template<class LP_TYPE>
-  void AddMessages(const LP_TYPE &LP) {
-    for (INDEX i = 0; i < LP.GetNumberOfMessages(); ++i) {
-      auto* m = LP.GetMessage(i);
-      if (HasFactor(m->GetLeftFactor()) && HasFactor(m->GetRightFactor()))
-        AddMessage(m);
-    }
+  void add_messages(const LP_TYPE &LP) {
+    LP.for_each_message([this](auto* m) {
+      if (has_factor(m->GetLeftFactor()) && has_factor(m->GetRightFactor()))
+        add_message(m);
+    });
   }
 
-  bool HasFactor(FactorTypeAdapter* f) {
+  bool has_factor(FactorTypeAdapter* f) {
     return factor_address_to_index_.find(f) != factor_address_to_index_.end();
   }
 
-  bool HasMessage(MessageTypeAdapter* m) {
+  bool has_message(AbstractMessageContainer* m) {
     return m_.find(m) != m_.end();
   }
 
@@ -70,11 +71,6 @@ public:
       for (auto* f : f_)
         f->convert_primal(s_);
 
-#ifndef NDEBUG
-      for (auto* m : m_)
-        assert(m->CheckPrimalConsistency());
-#endif
-
       dirty_ = false;
     }
 
@@ -93,7 +89,7 @@ public:
 private:
   DD_ILP::external_solver_interface<EXTERNAL_SOLVER> s_;
   std::vector<FactorTypeAdapter*> f_;
-  std::unordered_set<MessageTypeAdapter*> m_;
+  std::unordered_set<AbstractMessageContainer*> m_;
   std::unordered_map<FactorTypeAdapter*, INDEX> factor_address_to_index_;
   std::vector<typename DD_ILP::variable_counters> external_variable_counter_;
   bool dirty_;
@@ -102,3 +98,5 @@ private:
 } // end namespace LP_MP
 
 #endif // LP_MP_partial_external_interface_HXX
+
+/* vim: set ts=2 sts=2 sw=2 et: */
