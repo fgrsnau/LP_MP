@@ -80,12 +80,6 @@ public:
     };
 #endif
 
-    auto add_factor = [&](FactorTypeAdapter* f) {
-      assert(factor_states.find(f) != factor_states.end());
-      if (factor_states[f] == State::Active)
-        external_solver.add_factor(f);
-    };
-
     auto update_partition = [&]() {
       this->for_each_factor([&](auto* f) {
         assert(f->LowerBound() <= f->EvaluatePrimal() + eps);
@@ -96,7 +90,7 @@ public:
           break;
         case State::Active:
           if (f->LowerBound() < f->EvaluatePrimal() - eps) // not locally optimal
-            add_factor(f);
+            external_solver.add_factor(f);
           break;
         case State::ILP:
           break;
@@ -112,7 +106,7 @@ public:
           for (auto* f : tmp) {
             assert(factor_states.find(f) != factor_states.end());
             if (factor_states[f] == State::Active) {
-              add_factor(f);
+              external_solver.add_factor(f);
 #ifndef NDEBUG
               handled = true;
 #endif
@@ -174,10 +168,15 @@ public:
       // reduces the number of iterations.
       INDEX bridge_count = external_solver.GetNumberOfFactors();
       this->for_each_factor([&](auto* f) {
-        if (external_solver.has_factor(f))
-          if (f->no_messages() <= 2) // is bridging factor
-            for (auto& msg_it : f->get_messages())
-              external_solver.add_factor(msg_it.adjacent_factor);
+        assert(factor_states.find(f) != factor_states.end());
+        if (factor_states[f] == State::Active && f->no_messages() <= 2) { // is "active" bridging factor
+          for (auto& msg_it : f->get_messages()) {
+            assert(factor_states.find(msg_it.adjacent_factor) != factor_states.end());
+            auto& neighboring_state = factor_states[msg_it.adjacent_factor];
+            if (neighboring_state == State::LP)
+              neighboring_state = State::Active;
+          }
+        }
       });
       bridge_count = external_solver.GetNumberOfFactors() - bridge_count;
       std::cout << "CombiLP: Added " << bridge_count << " bridging factors." << std::endl;
