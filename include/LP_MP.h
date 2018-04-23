@@ -245,11 +245,18 @@ public:
    template<typename CALLABLE>
    void for_each_factor(CALLABLE c) const
    {
-      for_each_tuple(factors_, [this, &c](auto &fac_vec) {
+#ifndef NDEBUG
+      INDEX count = 0;
+#endif
+      for_each_tuple(factors_, [&](auto &fac_vec) {
         for (auto* fac : fac_vec) {
           c(fac);
+#ifndef NDEBUG
+          ++count;
+#endif
         }
       });
+      assert(count == f_.size());
    }
 
    INDEX GetNumberOfFactors() const { return f_.size(); }
@@ -286,11 +293,18 @@ public:
    template<typename CALLABLE>
    void for_each_message(CALLABLE c) const
    {
-      for_each_tuple(messages_, [this, &c](auto &msg_vec) {
+#ifndef NDEBUG
+      INDEX count = 0;
+#endif
+      for_each_tuple(messages_, [&](auto &msg_vec) {
         for (auto* msg : msg_vec) {
           c(msg);
+#ifndef NDEBUG
+          ++count;
+#endif
         }
       });
+      assert(count == m_.size());
    }
 
    //virtual INDEX AddMessage(MessageTypeAdapter* m);

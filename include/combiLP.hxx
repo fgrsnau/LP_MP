@@ -241,6 +241,11 @@ public:
       // consistency on "active" part of the LP. Hence implements optimality
       // check. :)
       update_partition();
+#ifndef NDEBUG
+      check_invariant();
+      if (std::abs(upper_bound - lower_bound) > eps)
+        assert(external_solver.dirty());
+#endif
     }
 
 #ifndef NDEBUG
