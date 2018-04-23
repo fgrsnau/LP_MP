@@ -169,16 +169,23 @@ public:
       INDEX bridge_count = external_solver.GetNumberOfFactors();
       this->for_each_factor([&](auto* f) {
         assert(factor_states.find(f) != factor_states.end());
-        if (factor_states[f] == State::Active && f->no_messages() <= 2) { // is "active" bridging factor
+        auto& factor_state = factor_states[f];
+        if (factor_state == State::Active && f->no_messages() <= 2) { // is "active" bridging factor
+          external_solver.add_factor(f);
+          factor_state = State::ILP;
+          ++size_ilp; --size_active;
           for (auto& msg_it : f->get_messages()) {
             assert(factor_states.find(msg_it.adjacent_factor) != factor_states.end());
             auto& neighboring_state = factor_states[msg_it.adjacent_factor];
-            if (neighboring_state == State::LP)
+            if (neighboring_state == State::LP) {
               neighboring_state = State::Active;
+              ++size_active; --size_lp;
+            }
           }
         }
       });
       bridge_count = external_solver.GetNumberOfFactors() - bridge_count;
+      assert(external_solver.GetNumberOfFactors() == size_ilp);
       std::cout << "CombiLP: Added " << bridge_count << " bridging factors." << std::endl;
 #endif // LP_MP_COMBILP_DISABLE_BRIDGE_FACTOR_OPTIMIZATION
 
