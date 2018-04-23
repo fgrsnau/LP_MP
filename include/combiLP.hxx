@@ -250,7 +250,6 @@ public:
 #ifndef NDEBUG
     lower_bound = this->LowerBound();
     upper_bound = this->EvaluatePrimal();
-    std::cout << "DEBUG: " << lower_bound << " / " << upper_bound << std::endl;
 
     this->for_each_message([&](auto* m) { assert(m->CheckPrimalConsistency()); });
     assert(std::abs(upper_bound - lower_bound) <= eps);
