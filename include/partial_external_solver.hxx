@@ -5,6 +5,12 @@
 #include "LP_MP.h"
 #include "external_solver_interface.hxx"
 
+#ifdef NDEBUG
+# define LP_MP_partial_external_interface_SAVED_NDEBUG
+# undef NDEBUG
+# include <cassert>
+#endif
+
 namespace LP_MP {
 
 // This class mimics an `LP_MP::LP` but does not inherit from it. This allows
@@ -96,6 +102,11 @@ private:
 };
 
 } // end namespace LP_MP
+
+#ifdef LP_MP_partial_external_interface_SAVED_NDEBUG
+# define NDEBUG
+# include <cassert>
+#endif
 
 #endif // LP_MP_partial_external_interface_HXX
 

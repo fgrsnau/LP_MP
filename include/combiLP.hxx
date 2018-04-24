@@ -9,6 +9,12 @@
 #include "partial_external_solver.hxx"
 #include "factor_archive.hxx"
 
+#ifdef NDEBUG
+# define LP_MP_COMBILP_SAVED_NDEBUG
+# undef NDEBUG
+# include<cassert>
+#endif
+
 namespace LP_MP {
 
 template<typename EXTERNAL_SOLVER, typename BASE_LP>
@@ -297,6 +303,11 @@ private:
 };
 
 } // namespace LP_MP
+
+#ifdef LP_MP_COMBILP_SAVED_NDEBUG
+# define NDEBUG
+# include <cassert>
+#endif
 
 #endif // LP_MP_combiLP_HXX
 
