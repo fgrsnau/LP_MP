@@ -14,7 +14,12 @@ namespace LP_MP {
 template<typename EXTERNAL_SOLVER, typename BASE_LP>
 class combiLP : public BASE_LP {
 public:
-  using BASE_LP::BASE_LP;
+  combiLP(TCLAP::CmdLine& cmd)
+  : BASE_LP(cmd)
+  , bridge_factor_optimization_arg_("", "combiLP_BridgeFactorOpt", "optimize for bridge factors", cmd)
+  , is_ilp_phase_(false)
+  {
+  }
 
   double LowerBound() {
     return is_ilp_phase_ ? PseudoBound() : BASE_LP::LowerBound();
@@ -47,52 +52,60 @@ public:
     };
 #endif
 
+    using primals = factor_archive<serialization_functor::primal>;
     INDEX size_lp, size_active, size_ilp;
     std::unordered_map<FactorTypeAdapter*, State> factor_states;
     partial_external_solver<EXTERNAL_SOLVER> external_solver;
-    factor_archive<serialization_functor::primal> archive(this->f_.begin(), this->f_.end());
+    primals primals_lp(this->f_.begin(), this->f_.end());
     double lower_bound = -std::numeric_limits<double>::infinity();
     double upper_bound = std::numeric_limits<double>::infinity();
 
 #ifndef NDEBUG
-    auto check_invariant = [&]() {
+    auto check_invariant = [&](bool ilp_must_be_consistent=false) {
+      return;
       // The primal assignment in LP region must not have been modified. Note
       // that the Active regions theoretically belongs to the LP part, but we
       // allow modificatons as the algorithm works actively on it and performs
       // optimality checking by modifying the assignment and checking the
       // bounds.
-      decltype(archive) a(this->f_.begin(), this->f_.end());
+      primals p(this->f_.begin(), this->f_.end());
       this->for_each_factor([&](auto* f) {
         assert(factor_states.find(f) != factor_states.end());
         if (factor_states[f] == State::LP) {
-          assert(decltype(archive)::check_factor_equality(archive, a, f));
+          assert(decltype(primals_lp)::check_factor_equality(primals_lp, p, f));
         }
       });
 
-      // Messages inside LP and ILP have to be consistent (messages on borders
-      // are excluded).
+      // Messages inside LP (and ILP if ilp_must_be_consistent set) have to be
+      // consistent (messages on borders are always excluded).
       this->for_each_message([&](auto* m) {
         auto* l = m->GetLeftFactor(); bool l_in_ilp = external_solver.has_factor(l);
         auto* r = m->GetRightFactor(); bool r_in_ilp = external_solver.has_factor(r);
-        if (l_in_ilp == r_in_ilp)
+        if ( (!l_in_ilp && !r_in_ilp) || (ilp_must_be_consistent && l_in_ilp && r_in_ilp) )
           assert(m->CheckPrimalConsistency());
       });
     };
 #endif
 
-    auto update_partition = [&]() {
+    // In a nutshell:
+    //   - restores LP and ILP labeling (if primals_ilp != nullptr)
+    //   - moves non-optimal "active" factors into ILP
+    //   - checks message consistency on boundary (and moves factors into ILP)
+    auto update_partition = [&](primals* primals_ilp) {
       this->for_each_factor([&](auto* f) {
         assert(f->LowerBound() <= f->EvaluatePrimal() + eps);
         assert(factor_states.find(f) != factor_states.end());
         switch (factor_states[f]) {
         case State::LP:
-          archive.load_factor(f);
+          primals_lp.load_factor(f);
           break;
         case State::Active:
           if (f->LowerBound() < f->EvaluatePrimal() - eps) // not locally optimal
             external_solver.add_factor(f);
           break;
         case State::ILP:
+          if (primals_ilp)
+            primals_ilp->load_factor(f);
           break;
         };
       });
@@ -115,7 +128,12 @@ public:
           assert(handled);
         }
       });
+    };
 
+    // Updates the state of labeling. First LP and ILP parts are set and
+    // afterwards the "active" region is computed. Additionally
+    // size_{lp,active,ilp} are set.
+    auto update_states = [&]() {
       size_lp = 0; size_active = 0; size_ilp = 0;
       for (auto* f : this->f_) {
         assert(factor_states.find(f) != factor_states.end());
@@ -149,10 +167,11 @@ public:
       assert(size_lp + size_active + size_ilp == this->f_.size());
     };
 
-    // Initialize first ILP subproblem
+    // Initialize first ILP subproblem.
     for (auto* f : this->f_)
       factor_states[f] = State::Active;
-    update_partition();
+    update_partition(nullptr);
+    update_states();
 
     // Iterate until convergence (dirty flag basically signals consistency).
     int iteration = 0;
@@ -161,33 +180,22 @@ public:
       check_invariant();
 #endif
 
-#ifndef LP_MP_COMBILP_DISABLE_BRIDGE_FACTOR_OPTIMIZATION
       // Optional Optimization: Add neighbors of "bridging" factors (at most 2
       // neighbors). This corresponds to "pairwise" edges for original CombiLP
       // on Graphical Models. This should be a huge performance boost as it
       // reduces the number of iterations.
-      INDEX bridge_count = external_solver.GetNumberOfFactors();
-      this->for_each_factor([&](auto* f) {
-        assert(factor_states.find(f) != factor_states.end());
-        auto& factor_state = factor_states[f];
-        if (factor_state == State::Active && f->no_messages() <= 2) { // is "active" bridging factor
-          external_solver.add_factor(f);
-          factor_state = State::ILP;
-          ++size_ilp; --size_active;
-          for (auto& msg_it : f->get_messages()) {
-            assert(factor_states.find(msg_it.adjacent_factor) != factor_states.end());
-            auto& neighboring_state = factor_states[msg_it.adjacent_factor];
-            if (neighboring_state == State::LP) {
-              neighboring_state = State::Active;
-              ++size_active; --size_lp;
-            }
-          }
-        }
-      });
-      bridge_count = external_solver.GetNumberOfFactors() - bridge_count;
-      assert(external_solver.GetNumberOfFactors() == size_ilp);
-      std::cout << "CombiLP: Added " << bridge_count << " bridging factors." << std::endl;
-#endif // LP_MP_COMBILP_DISABLE_BRIDGE_FACTOR_OPTIMIZATION
+      if (bridge_factor_optimization_arg_.getValue()) {
+        INDEX bridge_count = external_solver.GetNumberOfFactors();
+        this->for_each_factor([&](auto* f) {
+        if (external_solver.has_factor(f))
+          if (f->no_messages() <= 2) // is bridging factor
+            for (auto& msg : f->get_messages())
+              external_solver.add_factor(msg.adjacent_factor);
+        });
+        bridge_count = external_solver.GetNumberOfFactors() - bridge_count;
+        std::cout << "CombiLP: Added " << bridge_count << " bridge factors." << std::endl;
+        update_states();
+      }
 
       // Reparametrize border: Improves convergence.
       // TODO: Evaluate if this is really necessary and improves convergence
@@ -200,6 +208,9 @@ public:
         if (!external_solver.has_factor(l) && external_solver.has_factor(r))
           m->send_message_to_right();
       });
+#ifndef NDEBUG
+      check_invariant();
+#endif
 
       // Add messages connecting all factors in the ILP.
       external_solver.add_messages(*this);
@@ -214,10 +225,11 @@ public:
                 << "%)" << std::endl;
 
       const bool solved = external_solver.solve();
-      assert(solved);
-
+      if (!solved)
+        throw std::runtime_error("External solver failed to solve the problem.");
+      primals primals_ilp(this->f_.begin(), this->f_.end());
 #ifndef NDEBUG
-      check_invariant();
+      check_invariant(true);
 #endif
 
       lower_bound = this->LowerBound();
@@ -235,6 +247,9 @@ public:
       for (auto* f : this->f_)
         if (external_solver.has_factor(f))
           f->propagate_primal_through_messages();
+#ifndef NDEBUG
+      this->for_each_message([&](auto* m) { assert(m->CheckPrimalConsistency()); });
+#endif
 
       upper_bound = this->EvaluatePrimal();
       assert(lower_bound <= upper_bound + eps);
@@ -246,7 +261,8 @@ public:
       // Does the real science: Restores LP primal assignment, checks boundary
       // consistency on "active" part of the LP. Hence implements optimality
       // check. :)
-      update_partition();
+      update_partition(&primals_ilp);
+      update_states();
 #ifndef NDEBUG
       check_invariant();
       if (std::abs(upper_bound - lower_bound) > eps)
@@ -266,7 +282,7 @@ public:
     // region might still have been modified, as only the bounds have been
     // checked. Additionally to the normal `check_invariant` we just make sure
     // that the LP+Active region is really locally optimal.
-    check_invariant();
+    check_invariant(true);
     for (auto* f : this->f_) {
       assert(factor_states.find(f) != factor_states.end());
       if (factor_states[f] != State::ILP)
@@ -276,7 +292,8 @@ public:
   }
 
 private:
-  bool is_ilp_phase_ = false;
+  TCLAP::SwitchArg bridge_factor_optimization_arg_;
+  bool is_ilp_phase_;
 };
 
 } // namespace LP_MP
