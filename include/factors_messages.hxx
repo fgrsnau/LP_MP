@@ -2277,10 +2277,15 @@ public:
    void ReceiveMessages(const WEIGHT_VEC& receive_mask) 
    {
       assert(std::distance(receive_mask.begin(), receive_mask.end()) == no_receive_messages()); 
-      assert(*std::max_element(receive_mask.begin(), receive_mask.end()) <= 1);
-      assert(*std::min_element(receive_mask.begin(), receive_mask.end()) >= 0);
-
       assert(receive_mask.size() == no_receive_messages());
+
+#ifndef NDEBUG
+      if (receive_mask.size() > 0) {
+        assert(*std::max_element(receive_mask.begin(), receive_mask.end()) <= 1);
+        assert(*std::min_element(receive_mask.begin(), receive_mask.end()) >= 0);
+      }
+#endif
+
       auto receive_it = receive_mask.begin();
 
       meta::for_each(MESSAGE_DISPATCHER_TYPELIST{}, [this,&receive_it](auto l) {
