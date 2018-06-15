@@ -1151,11 +1151,18 @@ void LP<FMC>::ComputeAnisotropicWeights2(
       auto* f_right = m_[i].right;
       const INDEX f_index_right = factor_address_to_index_[f_right];
       const INDEX index_right = f_sorted_inverse[f_index_right];
-      
+
       if(m_[i].sends_message_to_right && index_left < index_right) {
         no_send_messages_later[index_left]++;
       }
       if(m_[i].sends_message_to_left && index_right < index_left) {
+        no_send_messages_later[index_right]++;
+      }
+
+      if(m_[i].receives_message_from_left && index_left < index_right) {
+        no_send_messages_later[index_left]++;
+      }
+      if(m_[i].receives_message_from_right && index_right < index_left) {
         no_send_messages_later[index_right]++;
       }
    }
