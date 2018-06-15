@@ -309,6 +309,7 @@ public:
    INDEX GetNumberOfMessages() const { return m_.size(); }
 
    void AddFactorRelation(FactorTypeAdapter* f1, FactorTypeAdapter* f2); // indicate that factor f1 comes before factor f2
+   void AddAsymmetricFactorRelation(FactorTypeAdapter* f1, FactorTypeAdapter* f2);
    void ForwardPassFactorRelation(FactorTypeAdapter* f1, FactorTypeAdapter* f2);
    void BackwardPassFactorRelation(FactorTypeAdapter* f1, FactorTypeAdapter* f2);
 
@@ -357,7 +358,7 @@ public:
    void ComputeAnisotropicWeights(FACTOR_ITERATOR factorIt, FACTOR_ITERATOR factorItEnd, weight_array& omega, receive_array& receive_mask); 
 
    template<typename FACTOR_ITERATOR>
-   std::unordered_map<FactorTypeAdapter*,std::size_t> get_factor_indices(FACTOR_ITERATOR f_begin, FACTOR_ITERATOR f_end);
+   std::unordered_map<const FactorTypeAdapter*,std::size_t> get_factor_indices(FACTOR_ITERATOR f_begin, FACTOR_ITERATOR f_end) const;
 
    template<typename ITERATOR>
    weight_array allocate_omega(ITERATOR factor_begin, ITERATOR factor_end);
@@ -475,6 +476,9 @@ public:
         throw std::runtime_error("no reparametrization mode set");
       }
    }
+
+   auto get_forward_update_indices() const { return get_factor_indices(forwardUpdateOrdering_.begin(), forwardUpdateOrdering_.end()); }
+   auto get_backward_update_indices() const { return get_factor_indices(backwardUpdateOrdering_.begin(), backwardUpdateOrdering_.end()); }
 
    void add_to_constant(const REAL x) { constant_ += x; }
 
@@ -740,6 +744,13 @@ void LP<FMC>::AddFactorRelation(FactorTypeAdapter* f1, FactorTypeAdapter* f2)
 {
   ForwardPassFactorRelation(f1,f2);
   BackwardPassFactorRelation(f2,f1);
+}
+
+template<typename FMC>
+void LP<FMC>::AddAsymmetricFactorRelation(FactorTypeAdapter* f1, FactorTypeAdapter* f2)
+{
+  ForwardPassFactorRelation(f1,f2);
+  BackwardPassFactorRelation(f1,f2);
 }
 
 template<typename FMC>
@@ -1190,9 +1201,9 @@ void LP<FMC>::ComputeAnisotropicWeights2(
 
 template<typename FMC>
 template<typename FACTOR_ITERATOR>
-std::unordered_map<FactorTypeAdapter*, std::size_t> LP<FMC>::get_factor_indices(FACTOR_ITERATOR f_begin, FACTOR_ITERATOR f_end)
+std::unordered_map<const FactorTypeAdapter*, std::size_t> LP<FMC>::get_factor_indices(FACTOR_ITERATOR f_begin, FACTOR_ITERATOR f_end) const
 {
-    std::unordered_map<FactorTypeAdapter*, std::size_t> indices;
+    std::unordered_map<const FactorTypeAdapter*, std::size_t> indices;
     indices.reserve( std::distance(f_begin, f_end) );
     std::size_t i=0;
     for(auto f_it=f_begin; f_it!=f_end; ++f_it, ++i) {
